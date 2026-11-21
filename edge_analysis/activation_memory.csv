@@ -1,0 +1,6 @@
+Width (w),Input Elements (5),Hidden 1 Elements (w),Hidden 2 Elements (w),Output Elements (1),Total Unshared Elements,Peak Live Elements,Peak Live F32 (Bytes),Peak Live F32 (KiB),Peak Live Int8 (Bytes),Peak Live Int8 (KiB),Double Buffer F32 (Bytes),Double Buffer Int8 (Bytes)
+32,5,32,32,1,70,64,256,0.25,64,0.0625,256,64
+128,5,128,128,1,262,256,1024,1.0,256,0.25,1024,256
+256,5,256,256,1,518,512,2048,2.0,512,0.5,2048,512
+512,5,512,512,1,1030,1024,4096,4.0,1024,1.0,4096,1024
+2048,5,2048,2048,1,4102,4096,16384,16.0,4096,4.0,16384,4096

@@ -1,0 +1,47 @@
+{
+  "team": 13,
+  "architecture": [
+    32,
+    32
+  ],
+  "dtype": "int8_weights_int32_biases",
+  "mae_float32": 17.5637,
+  "mae_int8_quantized": 45.5375,
+  "mae_delta": 27.9738,
+  "total_quantized_bytes": 1500,
+  "layers": [
+    {
+      "layer": "linear_1",
+      "weight_shape": [
+        32,
+        5
+      ],
+      "weight_scale": 0.018227190483273484,
+      "weight_bytes": 160,
+      "bias_bytes": 128,
+      "total_layer_bytes": 296
+    },
+    {
+      "layer": "linear_2",
+      "weight_shape": [
+        32,
+        32
+      ],
+      "weight_scale": 0.05005400199589767,
+      "weight_bytes": 1024,
+      "bias_bytes": 128,
+      "total_layer_bytes": 1160
+    },
+    {
+      "layer": "linear_3",
+      "weight_shape": [
+        1,
+        32
+      ],
+      "weight_scale": 0.0432191120357964,
+      "weight_bytes": 32,
+      "bias_bytes": 4,
+      "total_layer_bytes": 44
+    }
+  ]
+}
