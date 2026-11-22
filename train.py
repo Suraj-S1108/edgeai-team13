@@ -119,9 +119,14 @@ yv = val.days_left.to_numpy(np.float32)
 # Calculate mean and standard deviation using training
 # rows only. Do not use validation data.
 
-mu = np.zeros(X.shape[1], np.float32)
-sd = np.ones(X.shape[1], np.float32)
+mu = X.mean(axis=0)
+sd = X.std(axis=0)
 
+print("\n--- FEATURE NORMALISATION ---")
+print("Training feature means:", mu)
+print("Training feature standard deviations:", sd)
+
+print("Normalisation statistics calculated successfully.")
 
 # --------------------------------------------------
 # 9. Mean baseline
