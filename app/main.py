@@ -1,45 +1,60 @@
 """
-app/main.py -- STARTER battery API. Look for TODO.
+app/main.py -- EDGE AI Team 13 Battery-Life Prediction API
 
+Run locally:
     uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-GET  /health          -> {"status": "ok", "team": 7, "params": 1281, "val_mae": 3.4}
-GET  /model_info      -> the per-layer table: params, bytes, MACs, and whether it fits the doorbell
-POST /predict         one reading  -> {"days_left": 52.1, "timings_ms": {...}}
-POST /predict_batch   {"rows": [reading, ...]} -> {"days_left": [...], "timings_ms": {...}}
-A reading that is out of range gets HTTP 422 with the reason, never a guess.
+Endpoints:
+    GET  /
+        Returns API information and endpoint links.
+
+    GET  /health
+        Returns API status, team number, model parameters and validation MAE.
+
+    GET  /model_info
+        Returns layer details, parameters, memory estimates, MACs and SRAM fit.
+
+    POST /predict
+        Predicts remaining battery life for one sensor reading.
+
+    POST /predict_batch
+        Predicts remaining battery life for multiple sensor readings.
+
+Input validation:
+    Out-of-range sensor readings are rejected with HTTP 422.
+    The API does not return predictions for invalid readings.
 """
+
 import json
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
 
 from app.model import FEATURES, BatteryNet
 
-cfg = json.load(open("model/config.json"))
+CONFIG_PATH = Path("model/config.json")
+MODEL_PATH = Path("model/model.pt")
+
+cfg = json.load(open(CONFIG_PATH, "r", encoding="utf-8"))
 net = BatteryNet(tuple(cfg["hidden"]))
-net.load_state_dict(torch.load("model/model.pt", weights_only=True))
+net.load_state_dict(torch.load(MODEL_PATH, map_location="cpu", weights_only=True))
 net.eval()
 torch.set_num_threads(1)
-MU, SD = np.array(cfg["mu"], np.float32), np.array(cfg["sd"], np.float32)
+MU = np.array(cfg["mu"], np.float32)
+SD = np.array(cfg["sd"], np.float32)
 N_PARAMS = sum(p.numel() for p in net.parameters())
 
 
 class Reading(BaseModel):
-    # TODO Mission 3: a doorbell will send you glitches like the ones you found in Mission 1.
-    # Give every field a sensible range, e.g. Field(ge=..., le=...), so a glitch is refused
-    # with HTTP 422 instead of being answered with a made-up number. Base the limits on what a
-    # real sensor can report, not on your data's min and max: real readings must still get answers.
-    battery_v: float
-    temp_c: float
-    rings_per_day: float
-    wifi_rssi_dbm: float
-    age_months: float
-
+    battery_v: float = Field(ge=2.50, le=4.20)
+    temp_c: float = Field(ge=0, le=85)
+    rings_per_day: float = Field(ge=0, le=1000)
+    wifi_rssi_dbm: float = Field(ge=-100, le=-1)
+    age_months: float = Field(ge=0, le=240)
 
 class Batch(BaseModel):
     rows: list[Reading] = Field(min_length=1, max_length=10000)
@@ -49,49 +64,133 @@ app = FastAPI(title="Doorbell battery API")
 ms = lambda t0: round((time.perf_counter() - t0) * 1000, 3)
 
 
+@app.get("/")
+def root():
+    return {
+        "message": "EDGE AI Team 13 - Battery Life Prediction API",
+        "docs": "/docs",
+        "endpoints": ["/health", "/model_info", "/predict", "/predict_batch"]
+    }
+
+
 @app.get("/model_info")
 def model_info():
-    # TODO Mission 2 + 4: return your per-layer table, worked out FROM THE NETWORK (net.net),
-    # not typed in by hand, so it stays right if you change the layer sizes. Exactly these keys:
-    # {"layers": [{"name": "linear1", "in": 5, "out": 32, "params": ..., "bytes_f32": ..., "macs": ...}, ...],
-    #  "total_params": ..., "total_bytes_f32": ..., "total_bytes_int8": ..., "total_macs": ...,
-    #  "fits_300kb_sram_f32": true/false, "fits_300kb_sram_int8": true/false}
-    # Count only the Linear layers (ReLU has no parameters). Clue: a Linear layer m has
-    # m.in_features and m.out_features.
-    return {"layers": [], "total_params": 0}
+    layers = []
+
+    total_params = 0
+    total_bytes_f32 = 0
+    total_bytes_int8 = 0
+    total_macs = 0
+
+    linear_number = 0
+
+    # Inspect the actual network and count Linear layers.
+    for layer in net.network:
+        if isinstance(layer, torch.nn.Linear):
+            linear_number += 1
+
+            in_features = layer.in_features
+            out_features = layer.out_features
+
+            # Parameters = weights + biases
+            params = sum(p.numel() for p in layer.parameters())
+
+            # Storage calculations
+            bytes_f32 = params * 4
+            bytes_int8 = params * 1
+
+            # MACs = input features * output features
+            macs = in_features * out_features
+
+            layers.append({
+                "name": f"linear{linear_number}",
+                "in": in_features,
+                "out": out_features,
+                "params": params,
+                "bytes_f32": bytes_f32,
+                "macs": macs
+            })
+
+            total_params += params
+            total_bytes_f32 += bytes_f32
+            total_bytes_int8 += bytes_int8
+            total_macs += macs
+
+    # ESP32-S3 SRAM budget: approximately 300 KB.
+    SRAM_BUDGET = 300 * 1024
+
+    return {
+        "layers": layers,
+        "total_params": total_params,
+        "total_bytes_f32": total_bytes_f32,
+        "total_bytes_int8": total_bytes_int8,
+        "total_macs": total_macs,
+        "fits_300kb_sram_f32": total_bytes_f32 <= SRAM_BUDGET,
+        "fits_300kb_sram_int8": total_bytes_int8 <= SRAM_BUDGET
+    }
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "team": cfg["team"], "params": N_PARAMS, "val_mae": cfg["val_mae"]}
+    return {
+        "status": "ok",
+        "team": cfg["team"],
+        "team_members": [
+            "Suraj",
+            "Sujal Chavan",
+            "Nandish",
+            "Monika"
+        ],
+        "params": N_PARAMS,
+        "val_mae": cfg["val_mae"]
+    }
 
 
-async def run(request: Request, schema):
-    t_all = time.perf_counter(); t = {}
+async def run(data, schema):
+    t_all = time.perf_counter()
+    t = {}
+
     t0 = time.perf_counter()
-    try:
-        data = schema.model_validate_json(await request.body())
-    except ValidationError as e:
-        return JSONResponse(status_code=422, content={"error": "bad reading", "detail": json.loads(e.json())})
-    t["parse"] = ms(t0)
     rows = data.rows if isinstance(data, Batch) else [data]
-    # TODO Mission 3: time each of the three stages below the same way "parse" is timed above,
-    # storing them as t["normalise"], t["inference"] and t["build"].
-    x = (np.array([[getattr(r, f) for f in FEATURES] for r in rows], np.float32) - MU) / SD
+    t["parse"] = ms(t0)
+
+    t0 = time.perf_counter()
+    x = (
+        np.array(
+            [[getattr(r, f) for f in FEATURES] for r in rows],
+            np.float32
+        ) - MU
+    ) / SD
+    t["normalise"] = ms(t0)
+
+    t0 = time.perf_counter()
     with torch.no_grad():
         y = net(torch.from_numpy(x)).numpy()
-    days = [round(float(v), 2) for v in np.maximum(y, 0)]
-    body = {"days_left": days if isinstance(data, Batch) else days[0]}
+    t["inference"] = ms(t0)
+
+    t0 = time.perf_counter()
+    y_clipped = np.maximum(y, 0.0)
+    if y_clipped.ndim == 0:
+        days = [round(float(y_clipped), 2)]
+    else:
+        days = [round(float(v), 2) for v in y_clipped]
+
+    body = {
+        "days_left": days if isinstance(data, Batch) else days[0]
+    }
+    t["build"] = ms(t0)
+
     t["server_total"] = ms(t_all)
     body["timings_ms"] = t
+
     return body
 
 
 @app.post("/predict")
-async def predict(request: Request):
-    return await run(request, Reading)
+async def predict(data: Reading):
+    return await run(data, Reading)
 
 
 @app.post("/predict_batch")
-async def predict_batch(request: Request):
-    return await run(request, Batch)
+async def predict_batch(data: Batch):
+    return await run(data, Batch)
