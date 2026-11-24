@@ -1,14 +1,28 @@
-"""
-app/main.py -- STARTER battery API. Look for TODO.
 
+"""
+app/main.py -- EDGE AI Team 13 Battery-Life Prediction API
+
+Run locally:
     uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-GET  /health          -> {"status": "ok", "team": 7, "params": 1281, "val_mae": 3.4}
-GET  /model_info      -> the per-layer table: params, bytes, MACs, and whether it fits the doorbell
-POST /predict         one reading  -> {"days_left": 52.1, "timings_ms": {...}}
-POST /predict_batch   {"rows": [reading, ...]} -> {"days_left": [...], "timings_ms": {...}}
-A reading that is out of range gets HTTP 422 with the reason, never a guess.
+Endpoints:
+    GET  /health
+        Returns API status, team number, model parameters and validation MAE.
+
+    GET  /model_info
+        Returns layer details, parameters, memory estimates, MACs and SRAM fit.
+
+    POST /predict
+        Predicts remaining battery life for one sensor reading.
+
+    POST /predict_batch
+        Predicts remaining battery life for multiple sensor readings.
+
+Input validation:
+    Out-of-range sensor readings are rejected with HTTP 422.
+    The API does not return predictions for invalid readings.
 """
+
 import json
 import time
 
@@ -105,9 +119,22 @@ def model_info():
 
 
 
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "team": cfg["team"], "params": N_PARAMS, "val_mae": cfg["val_mae"]}
+    return {
+        "status": "ok",
+        "team": cfg["team"],
+        "team_members": [
+            "Suraj",
+            "Sujal Chavan",
+            "Nandish",
+            "Monika"
+        ],
+        "params": N_PARAMS,
+        "val_mae": cfg["val_mae"]
+    }
+
 
 
 

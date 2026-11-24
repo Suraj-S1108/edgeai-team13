@@ -1,191 +1,581 @@
-# Module 1: How Long Will the Battery Last?
+# EDGE AI — Team 13
+## How Long Will the Battery Last?
 
-**AI255TBD Edge AI · Module 1 assignment: Neural Networks from Scratch to Deployment**
-Team of four · runs entirely in GitHub Codespaces (no board this time)
+**AI255TBD Edge AI · Module 1 Assignment: Neural Networks from Scratch to Deployment**
 
-The doorbell company wants a number instead of "Low": **how many days of battery are left?**
-You train a small neural network on your team's log and serve it as a live API from a GitHub
-Codespace. The API also reports where its time goes, and whether the model would fit inside
-the doorbell itself.
+A neural-network-based battery-life prediction system for a smart doorbell.
 
-**You hand in one thing: a working endpoint.** Your instructor checks it with a script that
-sends it readings. There is no report and no viva, so the endpoint has to speak for you.
-
-This README is everything you need: what to do, in what order, and what is checked.
-**Find your team number in `TEAMS.csv`.** Your data file is `data/team_NN_train.csv` with that
-number. Use only your own team's file: every team's data, and the right answer, is different.
+The objective is to predict the remaining battery life in days using sensor readings. The trained model is served through a FastAPI application that provides individual predictions, batch predictions, model information and request-stage timing measurements.
 
 ---
 
-## 1. What is in this repository
+# 1. Team Information
 
-| Path | What it is | Your job |
-|---|---|---|
-| `TEAMS.csv` | Team numbers and names | Find your number |
-| `data/` | Every team's `team_NN_train.csv` | Use only yours |
-| `train.py` | Loads the CSV, splits off validation rows, trains the network, saves it to `model/` | TODOs: glitch rule, linear baseline, normalisation |
-| `app/model.py` | The network (5 → 32 → 32 → 1, ReLU), shared by training and the server | Change the layer sizes if you choose to |
-| `app/main.py` | The API: `GET /health`, `GET /model_info`, `POST /predict`, `POST /predict_batch` | TODOs: input ranges, stage timing, `/model_info` |
-| `client/bench.py` | Times your API from outside: first request, p50/p95/p99 per stage | Run it, don't change it |
-| `.devcontainer/` | Makes Codespaces install everything on start | Leave it alone |
-| `model/` | Created by `train.py`: `model.pt` and `config.json` | **Commit it** |
+**Team Number:** 13
+
+**Team Members:**
+1. Suraj
+2. Sujal Chavan
+3. Nandish
+4. Monika
 
 ---
 
-## 2. Set up (about 20 minutes)
+# 2. Project Overview
 
-1. One member creates a new repository on GitHub for your team and uploads **everything** in
-   this folder, keeping the folders as they are. Include the hidden `.devcontainer` folder
-   (on a Mac press Cmd+Shift+. in Finder to see it). Add the other three as collaborators.
-2. On your repository: **Code → Codespaces → Create codespace on main**. The first start
-   installs PyTorch and takes a few minutes. If nothing installs by itself, run
-   `pip install -r requirements.txt` in the terminal.
-3. Check that `data/team_NN_train.csv` (your number) is there.
-4. In the Codespace terminal, from the top folder:
-   ```
-   python train.py --team NN
-   uvicorn app.main:app --host 0.0.0.0 --port 8000
-   ```
-   The starter runs before you fill in any TODO. Its error will just be large.
-5. **Ports** tab → right-click **8000** → **Port Visibility → Public**. Copy the address
-   (`https://<name>-8000.app.github.dev`).
-6. On your laptop, open `<address>/health`, then `<address>/docs` to try `/predict` by hand.
-7. On your laptop: `pip install requests numpy`, then
-   `python client/bench.py --url <address> --n 20`.
+The doorbell company needs an accurate estimate of how many days of battery life remain instead of a simple low-battery warning.
 
-Stop the Codespace when you are not using it (your free hours are limited). Commit and push
-after every mission.
+This project uses a small feed-forward neural network trained on Team 13's battery dataset.
 
-**Every time the Codespace restarts, port 8000 goes back to Private.** After a restart, run
-`uvicorn` again and set the port to **Public** again, or nobody else can reach your endpoint.
+The application provides:
 
-**Before Mission 3:** ask an LLM which stage of a web request will be the slowest. Log its answer.
+- Battery-life predictions in days.
+- Input validation to reject invalid sensor readings.
+- Individual and batch prediction endpoints.
+- Per-layer model information.
+- Model parameter, memory and MAC calculations.
+- Request-stage timing measurements.
+- Analysis of the model's suitability for edge deployment.
+
+The API is designed to run in GitHub Codespaces and can be accessed through a public port 8000 URL.
 
 ---
 
-## 3. What you need to do
+# 3. Repository Structure
 
-Every mission follows the same loop: **write a prediction with a number → measure → explain the
-gap.** Rotate the roles (Builder, Measurer, Skeptic, Scribe) so everyone builds every part.
-
-### Mission 1: Meet the data and set the bar
-- [ ] Predict the error of always guessing the average.
-- [ ] Plot a histogram of every column, and `days_left` against each input. Which relationships are not straight lines?
-- [ ] **Code (`train.py`):** write the glitch rule for each kind of impossible reading you find, and count the rows removed.
-- [ ] Report the validation MAE (in days) of **baseline 1**, always predicting the mean.
-- [ ] **Code (`train.py`):** report the validation MAE of **baseline 2**, linear regression with `np.linalg.lstsq`. Plot predicted against true. Where is it most wrong?
-- [ ] Run `train.py` as it is and record the network's MAE.
-
-### Mission 2: A small network, opened up
-- [ ] Predict, by hand, the parameters, float32 bytes and MACs of 5 → 32 → 32 → 1.
-- [ ] **Code (`train.py`):** normalise the inputs using the training rows only. Compare training with and without normalisation.
-- [ ] Train with hidden widths 4, 8, 16, 32 and 64, with one and two hidden layers (`--hidden 16` or `--hidden 32,32`). Plot validation MAE against parameters.
-- [ ] Compare training MAE with validation MAE for your chosen size. Is it overfitting?
-- [ ] Work out the per-layer table (parameters, bytes, MACs) by hand, then **code (`app/main.py`):** make `/model_info` compute it from the network itself.
-- [ ] Choose your final model and write down the MAE you expect on the company's 400 unseen readings.
-
-### Mission 3: Serve it, and time every stage
-- [ ] Predict the inference time and the laptop-to-Codespace round trip.
-- [ ] **Code (`app/main.py`):** give every input a range, so glitches get HTTP 422. Base the ranges on what a real sensor can report, not on your data's smallest and largest values: a real reading just outside your data must still get an answer. Test three glitches at `/docs`.
-- [ ] **Code (`app/main.py`):** time `normalise`, `inference` and `build` the same way `parse` is timed.
-- [ ] From your **laptop**: `python client/bench.py --url <address> --n 200`. Record the first request, then p50/p95/p99 of the round trip and every stage.
-- [ ] Draw where the time goes in a typical request (server stages + network and framework). Was the LLM right?
-- [ ] Run it again with `--no-keepalive`, and once inside the Codespace against `http://localhost:8000`. Explain both differences.
-- [ ] Time 400 single `/predict` calls against one `/predict_batch` call of 400 rows. Explain the difference.
-
-### Mission 4: Would it fit inside the doorbell?
-ESP32-S3: about 512 KB SRAM (roughly 300 KB free for your program), 8 MB PSRAM, 16 MB flash.
-- [ ] For your model: bytes for weights and biases as float32 and int8, and the largest activation memory needed at once.
-- [ ] **Code (`app/main.py`):** add `total_bytes_int8`, `fits_300kb_sram_f32` and `fits_300kb_sram_int8` to `/model_info`.
-- [ ] Use the same function to fill in the table for 5 → w → w → 1 at w = 32, 128, 256, 512 and 2048: parameters, float32 size, int8 size, fits in 300 KB SRAM (float32 and int8), fits in 8 MB PSRAM, MACs.
-- [ ] Find the exact width where the weights stop fitting in 300 KB, at float32 and at int8.
-- [ ] Estimate one prediction's time on the board. State the speed you assume and where it came from.
-- [ ] Argue: should the doorbell call your server or run the model itself? Use latency, privacy, cost, power, and what happens when the Wi-Fi is down.
+| Path                                  | Description                                       |
+| ------------------------------------- | ------------------------------------------------- |
+| `app/`                                | FastAPI application and neural-network model       |
+| `app/main.py`                         | API endpoints, validation, inference and timing   |
+| `app/model.py`                        | Neural-network architecture                       |
+| `client/`                             | API benchmarking client                           |
+| `client/bench.py`                     | Measures API response times and stage timings     |
+| `data/`                               | Training datasets                                 |
+| `model/`                              | Trained model weights and configuration           |
+| `model/model.pt`                      | Saved neural-network weights                      |
+| `model/config.json`                   | Model architecture and normalization configuration |
+| `edge_analysis/`                      | Mission 3 and Mission 4 analysis                  |
+| `edge_analysis/mission3_report.md`    | Performance benchmarking report                   |
+| `edge_analysis/mission4_report.md`    | Edge memory and deployment analysis               |
+| `edge_analysis/memory_calculations.py`| Model memory calculations                         |
+| `edge_analysis/width_comparison.csv`  | Model-width comparison results                    |
+| `train.py`                            | Model training script                             |
+| `test_batch.py`                       | Batch prediction consistency test                 |
+| `benchmark_400.py`                    | Individual versus batch benchmark                 |
+| `requirements.txt`                    | Python dependencies                               |
+| `README.md`                           | Project documentation                             |
 
 ---
 
-## 4. What to hand in, and how it is checked
+# 4. Dataset Information
 
-**Last date of submission: Monday, 23 November 2026.** How to submit will be announced. You will need:
-1. **Your endpoint address**, e.g. `https://<name>-8000.app.github.dev`
-2. **Your repository link**, with every TODO done and the `model/` folder committed
+**Dataset:** `data/team_13_train.csv`
 
-**Keep the endpoint running during the check window** your instructor announces: Codespace
-started, `uvicorn` running, port 8000 set to **Public** (check it again after any restart). A Codespace stops itself when idle, so
-in GitHub **Settings → Codespaces → Default idle timeout**, set it as long as it goes before
-the window, and keep the Codespace open in a browser tab while the window is on. If the script
-cannot reach your endpoint, it cannot give you marks.
+The dataset contains 2,000 rows and six columns.
 
-The script checks:
+### Input features
 
-| Check | What it does | To pass |
-|---|---|---|
-| Health | `GET /health` | `"status": "ok"` and **your** team number |
-| Accuracy | Sends the company's 400 hidden readings to `/predict` one at a time | Error (MAE) close to what a good small network gets on your data |
-| Per-layer table | `GET /model_info` | Every layer's params, bytes and MACs right; layers connect 5 → … → 1; totals, int8 bytes and both "fits" answers right; `total_params` equals `/health`'s `params` |
-| Broken readings | Sends five broken readings | All five refused with a 4xx error, none answered |
-| Stage timing | Reads `timings_ms` on every reply | `parse`, `normalise`, `inference`, `build` and `server_total` on every reply |
-| Batch | Sends 50 readings to `/predict_batch` | Same answers as 50 single `/predict` calls |
+| Feature         | Description                     | Unit   |
+| --------------- | ------------------------------- | ------ |
+| `battery_v`     | Battery voltage                 | Volts  |
+| `temp_c`        | Temperature                     | °C     |
+| `rings_per_day` | Number of doorbell rings per day | Count  |
+| `wifi_rssi_dbm` | Wi-Fi signal strength           | dBm    |
+| `age_months`    | Device age                      | Months |
 
-Before you submit, test it yourself from your laptop:
-```
-python client/bench.py --url <your address> --n 50
-```
-and open `<your address>/health` and `<your address>/model_info` in a browser.
+**Target variable:** `days_left`
 
-You don't hand in the missions. They are how you get to a good endpoint, and every number
-the script checks comes out of them.
+The target represents the estimated remaining battery life in days.
 
-## 5. Quick reference
+Only Team 13's dataset is used for model training and evaluation.
 
-**The API (do not change the names or shapes):**
-```
-GET  /health          -> {"status": "ok", "team": 7, "params": 1281, "val_mae": 3.9}
-GET  /model_info      -> {"layers": [{"name": "linear1", "in": 5, "out": 32, "params": 192,
-                                      "bytes_f32": 768, "macs": 160}, ...],
-                          "total_params": 1281, "total_bytes_f32": 5124, "total_bytes_int8": 1281,
-                          "total_macs": 1216, "fits_300kb_sram_f32": true, "fits_300kb_sram_int8": true}
-POST /predict         {"battery_v": 3.86, "temp_c": 28.0, "rings_per_day": 5,
-                       "wifi_rssi_dbm": -66, "age_months": 22}
-                      -> {"days_left": 97.4, "timings_ms": {"parse": .., "normalise": ..,
-                          "inference": .., "build": .., "server_total": ..}}
-POST /predict_batch   {"rows": [reading, ...]} -> {"days_left": [...], "timings_ms": {...}}
-broken reading        -> HTTP 422 with the reason
-```
+---
 
-**Columns:** `battery_v` (V), `temp_c` (°C), `rings_per_day`, `wifi_rssi_dbm` (dBm, closer to 0 is stronger), `age_months`, `days_left` (the answer).
+# 5. Neural Network Architecture
 
-**Useful commands**
-```
-python train.py --team NN --hidden 32,32 --epochs 1500
+The final trained neural network uses the following architecture:
+
+**5 → 16 → 16 → 1**
+
+| Layer    | Input | Output |
+| -------- | ----: | -----: |
+| Input    |     5 |      5 |
+| Linear 1 |     5 |     16 |
+| Linear 2 |    16 |     16 |
+| Linear 3 |    16 |      1 |
+
+The network uses ReLU activation functions between its hidden layers.
+
+### Model summary
+
+| Metric                                  |     Result |
+| --------------------------------------- | ---------: |
+| Input features                          |          5 |
+| Hidden layers                           |          2 |
+| Hidden neurons                          |     16, 16 |
+| Output neurons                          |          1 |
+| Total parameters                        |        385 |
+| Validation MAE                          |  6.42 days |
+| Total MACs                              |        352 |
+| Float32 weight and bias storage         | 1,540 bytes |
+| Theoretical INT8 weight and bias storage|  385 bytes |
+
+The validation MAE of 6.42 days is measured on the project's validation data. It is not the final MAE on the instructor's 400 hidden readings.
+
+---
+
+# 6. API Endpoints
+
+The application is built using FastAPI.
+
+Start the API from the repository root:
+
+```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000
-python client/bench.py --url <address> --n 200 [--no-keepalive]
 ```
 
-**Counting a `Linear(a, b)` layer:** a×b weights + b biases; a×b MACs per prediction; float32 = 4 bytes, int8 = 1 byte.
+Interactive API documentation is available at:
+
+```text
+http://localhost:8000/docs
+```
+
+### 6.1 Health endpoint
+
+**GET `/health`**
+
+Returns the API status, team information and model details.
+
+Example response:
+
+```json
+{
+  "status": "ok",
+  "team": 13,
+  "team_members": [
+    "Suraj",
+    "Sujal Chavan",
+    "Nandish",
+    "Monika"
+  ],
+  "params": 385,
+  "val_mae": 6.42
+}
+```
+
+### 6.2 Model information endpoint
+
+**GET `/model_info`**
+
+Returns the per-layer parameter counts, float32 storage sizes, MACs and theoretical INT8 storage information.
+
+Example response:
+
+```json
+{
+  "layers": [
+    {
+      "name": "linear1",
+      "in": 5,
+      "out": 16,
+      "params": 96,
+      "bytes_f32": 384,
+      "macs": 80
+    },
+    {
+      "name": "linear2",
+      "in": 16,
+      "out": 16,
+      "params": 272,
+      "bytes_f32": 1088,
+      "macs": 256
+    },
+    {
+      "name": "linear3",
+      "in": 16,
+      "out": 1,
+      "params": 17,
+      "bytes_f32": 68,
+      "macs": 16
+    }
+  ],
+  "total_params": 385,
+  "total_bytes_f32": 1540,
+  "total_bytes_int8": 385,
+  "total_macs": 352,
+  "fits_300kb_sram_f32": true,
+  "fits_300kb_sram_int8": true
+}
+```
+
+The INT8 storage values are theoretical calculations. An actual quantized model has not been implemented or accuracy-tested.
+
+### 6.3 Individual prediction endpoint
+
+**POST `/predict`**
+
+Accepts one sensor reading and returns the estimated remaining battery life.
+
+Example request:
+
+```json
+{
+  "battery_v": 3.86,
+  "temp_c": 28,
+  "rings_per_day": 5,
+  "wifi_rssi_dbm": -66,
+  "age_months": 17
+}
+```
+
+Example response:
+
+```json
+{
+  "days_left": 142.77,
+  "timings_ms": {
+    "parse": 0.004,
+    "normalise": 1.673,
+    "inference": 677.356,
+    "build": 0.138,
+    "server_total": 679.201
+  }
+}
+```
+
+Timing values shown above are from an individual test request and can vary between executions.
+
+### 6.4 Batch prediction endpoint
+
+**POST `/predict_batch`**
+
+Accepts multiple sensor readings in a single request.
+
+Example request:
+
+```json
+{
+  "rows": [
+    {
+      "battery_v": 3.86,
+      "temp_c": 28,
+      "rings_per_day": 5,
+      "wifi_rssi_dbm": -66,
+      "age_months": 17
+    }
+  ]
+}
+```
+
+Returns a list of battery-life predictions and timing information.
+
+### 6.5 Input validation
+
+The API validates sensor readings using defined input ranges.
+
+| Feature         |    Minimum |    Maximum |
+| --------------- | ---------: | ---------: |
+| Battery voltage |        0 V |        5 V |
+| Temperature     |     -40 °C |      85 °C |
+| Rings per day   |          0 |       1000 |
+| Wi-Fi RSSI      |   -100 dBm |      0 dBm |
+| Device age      |   0 months | 240 months |
+
+Invalid readings are rejected with HTTP 422 responses rather than receiving predictions.
 
 ---
 
-## 6. Rules for using an LLM
+# 7. Mission 1 — Dataset Analysis and Baselines
 
-- Use it to explain, to check your reasoning, to explain error messages, and for hints. Do not use it for finished code.
-- Your measurements are the judge. If an LLM makes a claim you can test, test it.
-- Everyone must be able to explain every line you submit.
-- Everyone in the team should understand how each part of the endpoint works.
+Mission 1 focuses on understanding the dataset, examining feature relationships and establishing baseline prediction performance.
 
-## 7. When things go wrong
+The project includes dataset analysis and neural-network experimentation notebooks:
 
-| Problem | Try |
-|---|---|
-| The Codespace is still installing | The first start installs PyTorch. Wait; don't rebuild |
-| `No module named torch` (or fastapi) | The `.devcontainer` folder was not uploaded. Run `pip install -r requirements.txt` |
-| `/health` works in the Codespace but not from your laptop | Port 8000 is still Private. Set it to Public |
-| The address stopped working | The Codespace went idle. Start it, rerun `uvicorn`, and set port 8000 to Public again |
-| `ModuleNotFoundError: app` | Run commands from the top folder, not from inside `app/` |
-| `model/config.json` not found | Run `train.py` first, and commit `model/` |
-| `/model_info` is wrong after changing the layer sizes | Compute it from `net.net`, not by hand |
-| A result looks impossible | Good: that is the Skeptic's job. Find another explanation and test it |
+- `mission1_dataset_analysis.ipynb`
+- `mission2_neural_network_experiments.ipynb`
 
-Still stuck? Ask a teammate, then an LLM (and check what it says), then your instructor.
+These notebooks contain the exploratory analysis and model experimentation work.
+
+---
+
+# 8. Mission 2 — Neural Network Training
+
+Mission 2 focuses on neural-network architecture, input normalization, training and model evaluation.
+
+The final selected model is:
+
+**5 → 16 → 16 → 1**
+
+The trained weights and configuration are saved in:
+
+- `model/model.pt`
+- `model/config.json`
+
+The model contains 385 trainable parameters and achieves a validation MAE of 6.42 days.
+
+---
+
+# 9. Mission 3 — Performance Analysis and Benchmarking
+
+Mission 3 investigates the time required to process battery-life prediction requests.
+
+The experiments examine:
+
+- Laptop-to-localhost request timing.
+- Keep-alive versus no-keepalive requests.
+- Laptop-to-GitHub-Codespace request timing.
+- Codespace-localhost request timing.
+- Individual versus batch prediction performance.
+- Parsing, normalization, inference and response-building stages.
+
+### Verified benchmark results
+
+| Experiment                                               |        Result |
+| -------------------------------------------------------- | ------------: |
+| Laptop localhost, keep-alive p50 round trip              |      1.978 ms |
+| Laptop localhost, no-keepalive p50 round trip            |  2,049.505 ms |
+| Laptop to Codespace p50 round trip                       |     34.024 ms |
+| Codespace localhost p50 round trip                       |      1.989 ms |
+| 400 individual versus one batch request                  | 47.76× speedup |
+| Maximum prediction difference in 400-reading comparison  |     0.01 days |
+
+The 400-reading comparison showed that batch predictions matched individual predictions within the benchmark's 0.01-day tolerance.
+
+A separate 50-reading test also produced a maximum prediction difference of 0.0 days.
+
+The network-and-framework timing is calculated as round-trip time minus measured server time. It represents everything outside the measured server stages, not pure network latency alone.
+
+**Detailed report:** [Mission 3 — Performance Analysis](edge_analysis/mission3_report.md)
+
+---
+
+# 10. Mission 4 — Edge AI Memory and Deployment Analysis
+
+Mission 4 evaluates whether the selected neural network could fit within the memory constraints of an ESP32-S3-based doorbell.
+
+The analysis covers:
+
+- Float32 model storage.
+- Theoretical INT8 model storage.
+- Activation memory estimates.
+- Model-width comparisons.
+- SRAM and PSRAM capacity.
+- MAC calculations.
+- Theoretical inference-time estimates.
+- Cloud versus edge deployment considerations.
+
+### Selected model memory summary
+
+| Metric                                         |      Result |
+| ---------------------------------------------- | ----------: |
+| Total parameters                               |         385 |
+| Float32 weight and bias storage                | 1,540 bytes |
+| Theoretical INT8 storage                       |   385 bytes |
+| Total MACs                                     |         352 |
+| Largest single hidden-layer activation estimate|    64 bytes |
+
+The activation estimate represents the largest individual hidden-layer output buffer under the calculation assumptions. It is not a measurement of complete runtime RAM usage.
+
+The memory-fit calculations compare model weights and biases against the specified memory budgets. They do not include all application runtime, stack, scratch-buffer or framework overhead.
+
+Theoretical INT8 storage does not mean that the deployed model has already been quantized.
+
+No actual ESP32-S3 hardware inference benchmark has been performed.
+
+**Detailed report:** [Mission 4 — Edge Memory and Deployment Analysis](edge_analysis/mission4_report.md)
+
+---
+
+# 11. Testing and Verification
+
+The following checks have been performed locally.
+
+| Test                                            | Result                            |
+| ----------------------------------------------- | --------------------------------- |
+| `/health` endpoint                              | Verified                          |
+| Team number and parameter count                 | Verified                          |
+| Team member information                         | Verified locally                  |
+| `/model_info` layer calculations                | Verified                          |
+| Invalid battery voltage                         | HTTP 422                          |
+| Invalid temperature                             | HTTP 422                          |
+| Invalid device age                              | HTTP 422                          |
+| Invalid rings per day                           | HTTP 422                          |
+| Invalid Wi-Fi RSSI                              | HTTP 422                          |
+| `/predict` timing fields                        | Verified                          |
+| 50-reading batch consistency                    | Passed                            |
+| 400-reading individual versus batch comparison  | Passed within 0.01-day tolerance  |
+
+### 50-reading batch consistency test
+
+Run:
+
+```bash
+python test_batch.py http://localhost:8000
+```
+
+The test generates 50 reproducible readings, sends them through `/predict_batch`, sends the same readings individually through `/predict`, and compares the predictions.
+
+Verified result:
+
+```text
+Batch predictions: 50
+Individual predictions: 50
+Maximum prediction difference: 0.0 days
+
+SUCCESS: All 50 batch predictions match individual predictions.
+```
+
+### 400-reading benchmark
+
+Run:
+
+```bash
+python benchmark_400.py
+```
+
+This benchmark compares individual predictions against batch predictions for 400 readings.
+
+Verified result:
+
+- Individual requests: 400
+- Batch predictions: 400
+- Speedup: 47.76×
+- Maximum prediction difference: 0.01 days
+- Result: SUCCESS within the script's tolerance.
+
+**Important:** The instructor's separate 400 hidden readings have not yet been provided. Their final evaluation MAE remains pending.
+
+---
+
+# 12. Installation and Setup
+
+### Requirements
+
+- Python 3
+- PyTorch
+- FastAPI
+- Uvicorn
+- NumPy
+- GitHub Codespaces or a local Python environment
+
+### Install dependencies
+
+From the repository root:
+
+```bash
+pip install -r requirements.txt
+```
+
+### Start the API
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Open the API documentation
+
+```text
+http://localhost:8000/docs
+```
+
+### Test the health endpoint
+
+```text
+http://localhost:8000/health
+```
+
+### Test model information
+
+```text
+http://localhost:8000/model_info
+```
+
+### Run the batch test
+
+```bash
+python test_batch.py http://localhost:8000
+```
+
+### Run the client benchmark
+
+```bash
+python client/bench.py --url YOUR_API_ADDRESS --n 50
+```
+
+---
+
+# 13. GitHub Codespaces Deployment
+
+The application can be hosted using GitHub Codespaces.
+
+1. Open the project repository on GitHub.
+2. Create or open a Codespace on the required branch.
+3. Wait for dependencies to install.
+4. Start Uvicorn:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+5. Open the **Ports** tab.
+6. Locate port `8000`.
+7. Set its visibility to **Public**.
+8. Copy the public forwarding URL.
+
+The public endpoint will have a format similar to:
+
+```text
+https://YOUR-CODESPACE-8000.app.github.dev
+```
+
+Test:
+
+```text
+YOUR_API_ADDRESS/health
+YOUR_API_ADDRESS/model_info
+YOUR_API_ADDRESS/docs
+```
+
+After a Codespace restart, start Uvicorn again and check port 8000 visibility.
+
+Keep the Codespace running during the instructor's evaluation window.
+
+---
+
+# 14. Final Submission Requirements
+
+The assignment evaluation requires:
+
+1. A working public API endpoint.
+2. A GitHub repository link.
+3. The trained `model/` directory committed to the repository.
+4. Correct `/health` information.
+5. Accurate `/model_info` calculations.
+6. Correct rejection of five invalid readings.
+7. All required timing fields in prediction responses.
+8. Batch predictions matching individual predictions.
+9. Acceptable accuracy on the instructor's 400 hidden readings.
+
+The hidden-reading accuracy test will be performed when the instructor provides the evaluation readings.
+
+The public endpoint must remain accessible during the instructor's check window.
+
+---
+
+# 15. Project Summary
+
+Team 13 developed a neural-network-based battery-life prediction API using a trained feed-forward neural network.
+
+The final model uses a 5 → 16 → 16 → 1 architecture with 385 parameters and a validation MAE of 6.42 days.
+
+The application provides individual and batch predictions, input validation, model information and stage-level timing measurements.
+
+The performance and edge-deployment analyses examine the trade-offs between server-based inference and running a compact model on an embedded device.
+
+The project includes the trained model, API implementation, benchmarking scripts, experimental results and detailed Mission 3 and Mission 4 reports.
+
+---
+
+**Team 13 — EDGE AI**
 
 *Predict honestly. Measure carefully. Explain everything.*

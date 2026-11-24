@@ -1,0 +1,6 @@
+width,architecture,params,float32_bytes,int8_bytes,activation_bytes,macs,fits_sram_float32_weights,fits_sram_int8_weights,fits_psram_float32_weights,fits_psram_int8_weights
+32,5 -> 32 -> 32 -> 1,1281,5124,1281,128,1216,True,True,True,True
+128,5 -> 128 -> 128 -> 1,17409,69636,17409,512,17152,True,True,True,True
+256,5 -> 256 -> 256 -> 1,67585,270340,67585,1024,67072,True,True,True,True
+512,5 -> 512 -> 512 -> 1,266241,1064964,266241,2048,265216,False,True,True,True
+2048,5 -> 2048 -> 2048 -> 1,4210689,16842756,4210689,8192,4206592,False,False,False,True
