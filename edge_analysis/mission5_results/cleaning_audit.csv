@@ -1,0 +1,7 @@
+Cleaning Rule,Affected Rows,Percentage of Original Dataset
+Zero battery voltage,11,0.5499999999999999
+Non-positive temperature,8,0.4
+Zero WiFi RSSI,5,0.25
+Negative rings per day,0,0.0
+Negative device age,0,0.0
+Negative days left,0,0.0

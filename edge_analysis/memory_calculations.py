@@ -1,214 +1,201 @@
-
 """
-Phase 14: Edge AI Memory Calculations
-Team 13 - Battery Life Prediction
+edge_analysis/memory_calculations.py -- Edge AI Resource and Memory Calculations
+EDGE AI Team 13 - Battery Life Prediction
 
-Calculates:
-1. Actual model parameters and memory
-2. Float32 and INT8 weight storage
-3. Largest hidden-layer activation memory
-4. MACs per prediction
-5. Width comparison for 32, 128, 256, 512 and 2048
-6. SRAM and PSRAM weight-storage checks
-7. Exact maximum hidden widths for 300 KiB SRAM
+Calculates and compares:
+1. Parameter counts (weights, biases, total)
+2. Theoretical parameter storage (FP32, FP16, INT8)
+3. Input, output, and activation tensor memory
+4. MACs (Multiply-Accumulate operations) and FLOPs
+5. Checkpoint serialization size on disk
+6. ESP32-S3 SRAM (300 KiB) and PSRAM (8 MiB) budget compliance
+7. Bare-metal Microcontroller runtime arena estimates vs CPython runtime
+8. Hidden layer width scaling comparison
 """
 
 import csv
 import json
+import os
 from pathlib import Path
 
-
-# Project paths
+# Paths
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "model" / "config.json"
-OUTPUT_PATH = ROOT / "edge_analysis" / "width_comparison.csv"
+BACKUP_CONFIG_PATH = ROOT / "model" / "backup_16_16" / "config.json"
+MODEL_PATH = ROOT / "model" / "model.pt"
+BACKUP_MODEL_PATH = ROOT / "model" / "backup_16_16" / "model.pt"
+OUTPUT_WIDTH_CSV = ROOT / "edge_analysis" / "width_comparison.csv"
+OUTPUT_COMPARE_CSV = ROOT / "edge_analysis" / "model_memory_comparison.csv"
+
+# ESP32-S3 Hardware Budgets
+SRAM_BUDGET = 300 * 1024         # 300 KiB (307,200 bytes)
+PSRAM_BUDGET = 8 * 1024 * 1024   # 8 MiB (8,388,608 bytes)
 
 
-# ESP32-S3 memory budgets from assignment
-SRAM_BUDGET = 300 * 1024       # 300 KiB
-PSRAM_BUDGET = 8 * 1024 * 1024  # 8 MiB
-
-
-def calculate_model(hidden_widths):
+def calculate_architecture_details(hidden_widths, model_file=None):
     """
-    Calculate model parameters, memory and MACs.
-
-    Architecture:
-    5 -> hidden layers -> 1
+    Detailed resource breakdown for architecture: 5 -> hidden_widths -> 1
     """
-
     layer_sizes = [5, *hidden_widths, 1]
 
-    total_params = 0
+    layer_breakdown = []
+    total_weights = 0
+    total_biases = 0
     total_macs = 0
+    max_activation_dim = max(hidden_widths)
 
-    for inputs, outputs in zip(layer_sizes[:-1], layer_sizes[1:]):
+    for idx, (in_dim, out_dim) in enumerate(zip(layer_sizes[:-1], layer_sizes[1:]), 1):
+        weights = in_dim * out_dim
+        biases = out_dim
+        params = weights + biases
+        macs = weights
 
-        weights = inputs * outputs
-        biases = outputs
+        total_weights += weights
+        total_biases += biases
+        total_macs += macs
 
-        total_params += weights + biases
-        total_macs += weights
+        layer_breakdown.append({
+            "layer": f"Linear_{idx}",
+            "in": in_dim,
+            "out": out_dim,
+            "weights": weights,
+            "biases": biases,
+            "params": params,
+            "macs": macs,
+            "fp32_bytes": params * 4,
+            "int8_bytes": params * 1
+        })
 
-    # Weight and bias storage
-    float32_bytes = total_params * 4
+    total_params = total_weights + total_biases
+    fp32_bytes = total_params * 4
+    fp16_bytes = total_params * 2
     int8_bytes = total_params * 1
 
-    # Largest hidden-layer activation, assuming float32
-    activation_bytes = max(hidden_widths) * 4
+    # Tensor buffers (FP32)
+    input_tensor_bytes = 5 * 4
+    output_tensor_bytes = 1 * 4
+    peak_activation_bytes = max_activation_dim * 4
+
+    # Microcontroller inference arena estimate (weights + ping-pong buffers + scratchpad)
+    # Ping-pong buffer = 2 * peak_activation_bytes + scratch
+    bare_metal_arena_fp32 = fp32_bytes + (2 * peak_activation_bytes) + 256
+    bare_metal_arena_int8 = int8_bytes + (2 * max_activation_dim) + 256
+
+    # Checkpoint size on disk
+    checkpoint_file_size = None
+    if model_file and os.path.exists(model_file):
+        try:
+            checkpoint_file_size = os.path.getsize(model_file)
+        except OSError:
+            checkpoint_file_size = None
 
     return {
         "architecture": " -> ".join(map(str, layer_sizes)),
-        "params": total_params,
-        "float32_bytes": float32_bytes,
+        "hidden_layers": len(hidden_widths),
+        "total_weights": total_weights,
+        "total_biases": total_biases,
+        "total_params": total_params,
+        "fp32_bytes": fp32_bytes,
+        "fp16_bytes": fp16_bytes,
         "int8_bytes": int8_bytes,
-        "activation_bytes": activation_bytes,
-        "macs": total_macs,
-
-        # These checks concern weights and biases only.
-        "fits_sram_float32_weights": float32_bytes <= SRAM_BUDGET,
-        "fits_sram_int8_weights": int8_bytes <= SRAM_BUDGET,
-
-        "fits_psram_float32_weights": float32_bytes <= PSRAM_BUDGET,
-        "fits_psram_int8_weights": int8_bytes <= PSRAM_BUDGET,
+        "input_tensor_bytes": input_tensor_bytes,
+        "output_tensor_bytes": output_tensor_bytes,
+        "peak_activation_bytes": peak_activation_bytes,
+        "total_macs": total_macs,
+        "total_flops": total_macs * 2,
+        "checkpoint_file_size": checkpoint_file_size,
+        "bare_metal_arena_fp32": bare_metal_arena_fp32,
+        "bare_metal_arena_int8": bare_metal_arena_int8,
+        "sram_fp32_utilization_pct": round((fp32_bytes / SRAM_BUDGET) * 100, 3),
+        "sram_int8_utilization_pct": round((int8_bytes / SRAM_BUDGET) * 100, 3),
+        "fits_sram_fp32": fp32_bytes <= SRAM_BUDGET,
+        "fits_sram_int8": int8_bytes <= SRAM_BUDGET,
+        "fits_psram_fp32": fp32_bytes <= PSRAM_BUDGET,
+        "layer_breakdown": layer_breakdown
     }
 
 
-def calculate_exact_width_limits():
-    """Find the largest equal hidden width fitting the SRAM weight budget."""
-
-    def parameter_count(width):
-        # Architecture: 5 -> width -> width -> 1
-        return width * width + 8 * width + 1
-
-    max_float32_width = max(
-        width
-        for width in range(1, 10000)
-        if parameter_count(width) * 4 <= SRAM_BUDGET
-    )
-
-    max_int8_width = max(
-        width
-        for width in range(1, 10000)
-        if parameter_count(width) <= SRAM_BUDGET
-    )
-
-    return max_float32_width, max_int8_width
-
-
-def save_width_comparison(results):
-    """Save width comparison results to CSV."""
-
-    with OUTPUT_PATH.open(
-        "w",
-        newline="",
-        encoding="utf-8"
-    ) as file:
-
-        writer = csv.DictWriter(
-            file,
-            fieldnames=results[0].keys()
-        )
-
-        writer.writeheader()
-        writer.writerows(results)
-
-
 def main():
+    print("=================================================================")
+    print("  EDGE AI Team 13 — Memory and Resource Calculation Engine")
+    print("=================================================================\n")
 
-    # Load actual trained model configuration
-    with CONFIG_PATH.open(encoding="utf-8") as file:
-        config = json.load(file)
+    # 1. Compare Deployed 32-32 with Legacy 16-16
+    deployed_res = calculate_architecture_details([32, 32], MODEL_PATH)
+    legacy_res = calculate_architecture_details([16, 16], BACKUP_MODEL_PATH)
 
-    actual_widths = config["hidden"]
+    models_comparison = [
+        {"Model": "Legacy Baseline (16-16)", **{k: v for k, v in legacy_res.items() if k != "layer_breakdown"}},
+        {"Model": "Deployed Candidate (32-32)", **{k: v for k, v in deployed_res.items() if k != "layer_breakdown"}}
+    ]
 
-    # -------------------------------------------------
-    # ACTUAL TEAM 13 MODEL
-    # -------------------------------------------------
+    print("--- MODEL COMPARISON: 16-16 vs 32-32 ---")
+    for m in models_comparison:
+        print(f"\nModel: {m['Model']}")
+        print(f"  Architecture:           {m['architecture']}")
+        print(f"  Weights:                {m['total_weights']}")
+        print(f"  Biases:                 {m['total_biases']}")
+        print(f"  Total Parameters:       {m['total_params']}")
+        print(f"  FP32 Parameter Memory:  {m['fp32_bytes']} B ({m['fp32_bytes']/1024:.2f} KiB)")
+        print(f"  FP16 Parameter Memory:  {m['fp16_bytes']} B ({m['fp16_bytes']/1024:.2f} KiB)")
+        print(f"  INT8 Parameter Memory:  {m['int8_bytes']} B ({m['int8_bytes']/1024:.2f} KiB)")
+        print(f"  Peak Activation Memory: {m['peak_activation_bytes']} B")
+        print(f"  MACs / FLOPs:           {m['total_macs']} MACs / {m['total_flops']} FLOPs")
+        if m['checkpoint_file_size'] is not None:
+            ckpt_size_kib = m['checkpoint_file_size'] / 1024
+            print(f"  Checkpoint File Size:   {m['checkpoint_file_size']} B ({ckpt_size_kib:.2f} KiB)")
+        else:
+            print("  Checkpoint File Size:   Not available")
+        print(f"  Microcontroller Arena:  {m['bare_metal_arena_fp32']} B (FP32) | {m['bare_metal_arena_int8']} B (INT8)")
+        print(f"  SRAM Budget (300 KiB):  {m['sram_fp32_utilization_pct']}% utilized (Fits: {m['fits_sram_fp32']})")
 
-    print("\n========== ACTUAL TEAM 13 MODEL ==========")
+    # Save comparison CSV
+    with open(OUTPUT_COMPARE_CSV, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(models_comparison[0].keys()))
+        writer.writeheader()
+        writer.writerows(models_comparison)
+    print(f"\nSaved model memory comparison to: {OUTPUT_COMPARE_CSV}")
 
-    actual = calculate_model(actual_widths)
+    # 2. Width Scaling Analysis
+    print("\n--- WIDTH SCALING ANALYSIS (Two Hidden Layers: 5 -> W -> W -> 1) ---")
+    widths = [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
+    width_rows = []
 
-    for key, value in actual.items():
-        print(f"{key}: {value}")
+    for w in widths:
+        res = calculate_architecture_details([w, w])
+        row = {
+            "width": w,
+            "architecture": res["architecture"],
+            "params": res["total_params"],
+            "float32_bytes": res["fp32_bytes"],
+            "int8_bytes": res["int8_bytes"],
+            "activation_bytes": res["peak_activation_bytes"],
+            "macs": res["total_macs"],
+            "fits_sram_float32_weights": res["fits_sram_fp32"],
+            "fits_sram_int8_weights": res["fits_sram_int8"],
+            "fits_psram_float32_weights": res["fits_psram_fp32"],
+            "sram_utilization_pct": res["sram_fp32_utilization_pct"]
+        }
+        width_rows.append(row)
+        print(f"  Width {w:4d}: {res['total_params']:8d} params | FP32: {res['fp32_bytes']/1024:8.2f} KiB | SRAM: {res['sram_fp32_utilization_pct']:6.2f}% | Fits: {res['fits_sram_fp32']}")
 
-    print(f"Validation MAE: {config['val_mae']} days")
+    with open(OUTPUT_WIDTH_CSV, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(width_rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(width_rows)
+    print(f"Saved width comparison to: {OUTPUT_WIDTH_CSV}")
 
-    # -------------------------------------------------
-    # WIDTH COMPARISON
-    # -------------------------------------------------
+    # 3. Exact Width Limits for 300 KiB SRAM
+    def param_formula(w):
+        return w * w + 8 * w + 1
 
-    print("\n========== WIDTH COMPARISON ==========")
+    max_w_fp32 = max(w for w in range(1, 10000) if param_formula(w) * 4 <= SRAM_BUDGET)
+    max_w_int8 = max(w for w in range(1, 10000) if param_formula(w) <= SRAM_BUDGET)
 
-    widths = [32, 128, 256, 512, 2048]
-
-    results = []
-
-    for width in widths:
-
-        result = calculate_model([width, width])
-
-        results.append({
-            "width": width,
-            **result
-        })
-
-        print(f"\nWidth: {width}")
-        print(f"Architecture: {result['architecture']}")
-        print(f"Parameters: {result['params']}")
-        print(f"Float32 bytes: {result['float32_bytes']}")
-        print(f"INT8 bytes: {result['int8_bytes']}")
-        print(f"Activation bytes: {result['activation_bytes']}")
-        print(f"MACs: {result['macs']}")
-        print(
-            "Fits SRAM Float32 weights:",
-            result["fits_sram_float32_weights"]
-        )
-        print(
-            "Fits SRAM INT8 weights:",
-            result["fits_sram_int8_weights"]
-        )
-        print(
-            "Fits PSRAM Float32 weights:",
-            result["fits_psram_float32_weights"]
-        )
-        print(
-            "Fits PSRAM INT8 weights:",
-            result["fits_psram_int8_weights"]
-        )
-
-    save_width_comparison(results)
-
-    print(f"\nSaved comparison CSV: {OUTPUT_PATH}")
-
-    # -------------------------------------------------
-    # EXACT SRAM WIDTH LIMITS
-    # -------------------------------------------------
-
-    print("\n========== EXACT SRAM WIDTH LIMITS ==========")
-
-    float32_limit, int8_limit = calculate_exact_width_limits()
-
-    print(f"SRAM budget: {SRAM_BUDGET} bytes")
-    print(f"Float32 maximum width: {float32_limit}")
-    print(f"INT8 maximum width: {int8_limit}")
-
-    # Verify the next width exceeds the budget
-    next_float32 = calculate_model([float32_limit + 1] * 2)
-    next_int8 = calculate_model([int8_limit + 1] * 2)
-
-    print(
-        "Float32 next width exceeds:",
-        next_float32["float32_bytes"] > SRAM_BUDGET
-    )
-
-    print(
-        "INT8 next width exceeds:",
-        next_int8["int8_bytes"] > SRAM_BUDGET
-    )
-
-    print("\n========== CALCULATIONS COMPLETED ==========")
+    print("\n--- EXACT MAXIMUM EQUAL-WIDTH FOR 300 KiB SRAM ---")
+    print(f"  Maximum Width (FP32 weights): {max_w_fp32} ({param_formula(max_w_fp32)*4} B / {SRAM_BUDGET} B)")
+    print(f"  Maximum Width (INT8 weights): {max_w_int8} ({param_formula(max_w_int8)} B / {SRAM_BUDGET} B)")
+    print("\nCalculations completed successfully.")
 
 
 if __name__ == "__main__":

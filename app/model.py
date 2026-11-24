@@ -1,4 +1,4 @@
-"""model.py -- the network, shared by train.py and the server so both build the same thing."""
+"""model.py -- EDGE AI Team 13 BatteryNet architecture."""
 import torch
 from torch import nn
 
@@ -13,7 +13,12 @@ class BatteryNet(nn.Module):
             layers += [nn.Linear(n_in, h), nn.ReLU()]
             n_in = h
         layers.append(nn.Linear(n_in, 1))
-        self.net = nn.Sequential(*layers)
+        self.network = nn.Sequential(*layers)
+
+    @property
+    def net(self):
+        """Sequential container alias."""
+        return self.network
 
     def forward(self, x):
-        return self.net(x).squeeze(-1)
+        return self.network(x).squeeze(-1)

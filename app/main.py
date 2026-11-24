@@ -1,4 +1,3 @@
-
 """
 app/main.py -- EDGE AI Team 13 Battery-Life Prediction API
 
@@ -6,6 +5,9 @@ Run locally:
     uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 Endpoints:
+    GET  /
+        Returns API information and endpoint links.
+
     GET  /health
         Returns API status, team number, model parameters and validation MAE.
 
@@ -25,31 +27,34 @@ Input validation:
 
 import json
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
 
 from app.model import FEATURES, BatteryNet
 
-cfg = json.load(open("model/config.json"))
+CONFIG_PATH = Path("model/config.json")
+MODEL_PATH = Path("model/model.pt")
+
+cfg = json.load(open(CONFIG_PATH, "r", encoding="utf-8"))
 net = BatteryNet(tuple(cfg["hidden"]))
-net.load_state_dict(torch.load("model/model.pt", weights_only=True))
+net.load_state_dict(torch.load(MODEL_PATH, map_location="cpu", weights_only=True))
 net.eval()
 torch.set_num_threads(1)
-MU, SD = np.array(cfg["mu"], np.float32), np.array(cfg["sd"], np.float32)
+MU = np.array(cfg["mu"], np.float32)
+SD = np.array(cfg["sd"], np.float32)
 N_PARAMS = sum(p.numel() for p in net.parameters())
 
 
 class Reading(BaseModel):
-    battery_v: float = Field(ge=0.0, le=5.0)
-    temp_c: float = Field(ge=-40.0, le=85.0)
+    battery_v: float = Field(ge=2.50, le=4.20)
+    temp_c: float = Field(ge=0, le=85)
     rings_per_day: float = Field(ge=0, le=1000)
-    wifi_rssi_dbm: float = Field(ge=-100, le=0)
+    wifi_rssi_dbm: float = Field(ge=-100, le=-1)
     age_months: float = Field(ge=0, le=240)
-
 
 class Batch(BaseModel):
     rows: list[Reading] = Field(min_length=1, max_length=10000)
@@ -57,6 +62,15 @@ class Batch(BaseModel):
 
 app = FastAPI(title="Doorbell battery API")
 ms = lambda t0: round((time.perf_counter() - t0) * 1000, 3)
+
+
+@app.get("/")
+def root():
+    return {
+        "message": "EDGE AI Team 13 - Battery Life Prediction API",
+        "docs": "/docs",
+        "endpoints": ["/health", "/model_info", "/predict", "/predict_batch"]
+    }
 
 
 @app.get("/model_info")
@@ -71,10 +85,8 @@ def model_info():
     linear_number = 0
 
     # Inspect the actual network and count Linear layers.
-    for layer in net.net:
-
+    for layer in net.network:
         if isinstance(layer, torch.nn.Linear):
-
             linear_number += 1
 
             in_features = layer.in_features
@@ -118,8 +130,6 @@ def model_info():
     }
 
 
-
-
 @app.get("/health")
 def health():
     return {
@@ -134,8 +144,6 @@ def health():
         "params": N_PARAMS,
         "val_mae": cfg["val_mae"]
     }
-
-
 
 
 async def run(data, schema):
@@ -161,7 +169,12 @@ async def run(data, schema):
     t["inference"] = ms(t0)
 
     t0 = time.perf_counter()
-    days = [round(float(v), 2) for v in np.maximum(y, 0)]
+    y_clipped = np.maximum(y, 0.0)
+    if y_clipped.ndim == 0:
+        days = [round(float(y_clipped), 2)]
+    else:
+        days = [round(float(v), 2) for v in y_clipped]
+
     body = {
         "days_left": days if isinstance(data, Batch) else days[0]
     }
@@ -172,9 +185,6 @@ async def run(data, schema):
 
     return body
 
-  
-
-
 
 @app.post("/predict")
 async def predict(data: Reading):
@@ -184,4 +194,3 @@ async def predict(data: Reading):
 @app.post("/predict_batch")
 async def predict_batch(data: Batch):
     return await run(data, Batch)
-
